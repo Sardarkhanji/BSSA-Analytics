@@ -14,12 +14,17 @@ COPY requirements_dashboard.txt ./
 RUN pip install -r requirements_dashboard.txt
 
 COPY athlete_dashboard.py ./
+COPY api_server.py ./
+COPY start.sh ./
 COPY bihar_districts.geojson ./
 COPY "BSSA_logo.png" ./
 
-EXPOSE 8501
+RUN chmod +x start.sh
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+# 8501 = Streamlit dashboard, 8502 = FastAPI session API
+EXPOSE 8501 8502
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=25s --retries=3 \
     CMD curl -fsS http://localhost:8501/_stcore/health || exit 1
 
-CMD ["streamlit", "run", "athlete_dashboard.py", "--server.port=8501", "--server.address=0.0.0.0", "--browser.gatherUsageStats=false"]
+CMD ["./start.sh"]

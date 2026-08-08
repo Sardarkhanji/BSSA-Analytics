@@ -687,16 +687,50 @@ with title_col:
     st.title("🏃 Mashal Athlete Interactive Analytics Dashboard")
     st.write("Upload your Excel/CSV file to start analytics.")
 
-uploaded = st.file_uploader("Select athlete file", type=["xlsx", "csv"])
+# ── Session-based auto-load (Data Collection app integration) ─────────────
+# When the Flutter Data Collection app opens this dashboard with ?session=<id>,
+# the CSV is fetched from the companion API server instead of requiring a file
+# upload.  The file uploader is shown as a fallback for standalone use.
+_session_id: str = st.query_params.get("session", "")
+_session_bytes: Optional[bytes] = None
 
-if not uploaded:
+if _session_id:
+    try:
+        _resp = requests.get(
+            f"http://localhost:8502/sessions/{_session_id}",
+            timeout=5,
+        )
+        if _resp.ok:
+            _session_bytes = _resp.json()["csv"].encode("utf-8")
+        else:
+            st.warning(
+                f"⚠️ Could not retrieve session data (HTTP {_resp.status_code}). "
+                "Please upload a file manually."
+            )
+    except Exception as _exc:
+        st.warning(
+            f"⚠️ Analytics session service unreachable: {_exc}. "
+            "Please upload a file manually."
+        )
+
+if _session_bytes:
+    # Running in integrated mode — no file upload needed
+    st.info("📊 Live data loaded from the Data Collection app.")
+    uploaded = None
+else:
+    uploaded = st.file_uploader("Select athlete file", type=["xlsx", "csv"])
+
+if not _session_bytes and not uploaded:
     st.info("Please upload your `.xlsx` file to begin.")
     st.stop()
 
 basic_cfg, time_cfg, dist_cfg, all_tests_cfg = build_configs_from_ui()
 
 with st.spinner("Processing data and preparing analytics..."):
-    processed = process_data(uploaded.getvalue(), uploaded.name, basic_cfg, all_tests_cfg)
+    if _session_bytes:
+        processed = process_data(_session_bytes, "live_data.csv", basic_cfg, all_tests_cfg)
+    else:
+        processed = process_data(uploaded.getvalue(), uploaded.name, basic_cfg, all_tests_cfg)
 
 st.success("Analytics is now ready ✅")
 
@@ -750,7 +784,7 @@ with main_tabs[0]:
                           hole=0.4, color_discrete_sequence=COLORS["chart_palette"])
     fig_bmi_pie.update_traces(textposition='inside', textinfo='percent+label')
     fig_bmi_pie.update_layout(font=dict(size=14), title_font_size=18)
-    st.plotly_chart(fig_bmi_pie, use_container_width=True)
+    st.plotly_chart(fig_bmi_pie, use_container_width=True, key="participants-bmi-status")
 
     # Grouped bar chart for Valid vs Flagged entries per test (including height & weight)
     coverage_rows = []
@@ -776,7 +810,11 @@ with main_tabs[0]:
                                     xaxis_title='Test', yaxis_title='Count',
                                     font=dict(size=12), title_font_size=18,
                                     legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1))
-        st.plotly_chart(fig_coverage, use_container_width=True)
+        st.plotly_chart(
+            fig_coverage,
+            use_container_width=True,
+            key="participants-valid-flagged-coverage",
+        )
 
 with main_tabs[2]:
     st.subheader("Battery Tests")
@@ -832,7 +870,11 @@ with main_tabs[2]:
                         font=dict(size=12),
                         title_font_size=16,
                     )
-                    st.plotly_chart(fig_band, use_container_width=True)
+                    st.plotly_chart(
+                        fig_band,
+                        use_container_width=True,
+                        key=f"battery-{metric}-performance-bands",
+                    )
 
             # Valid vs Flagged pie chart – shown AFTER bands
             vis_df = pd.DataFrame({"Category": ["Valid", "Flagged"], "Count": [total_valid, total_participants - total_valid]})
@@ -840,7 +882,11 @@ with main_tabs[2]:
                                    hole=0.4, color="Category", color_discrete_map={"Valid": COLORS["valid"], "Flagged": COLORS["flagged"]})
             fig_valid_pie.update_traces(textposition='inside', textinfo='percent+label')
             fig_valid_pie.update_layout(font=dict(size=14), title_font_size=18)
-            st.plotly_chart(fig_valid_pie, use_container_width=True)
+            st.plotly_chart(
+                fig_valid_pie,
+                use_container_width=True,
+                key=f"battery-{metric}-valid-flagged-pie",
+            )
 
             if total_valid:
                 if cfg["higher_better"]:
@@ -915,7 +961,7 @@ with main_tabs[1]:
                           title="Records Cleaned/Flagged by Action",
                           color_discrete_sequence=[COLORS["secondary"]])
     fig_cleaning.update_layout(font=dict(size=12), title_font_size=18, yaxis=dict(autorange="reversed"))
-    st.plotly_chart(fig_cleaning, use_container_width=True)
+    st.plotly_chart(fig_cleaning, use_container_width=True, key="cleaning-actions-summary")
 
     st.markdown("### Detailed Transformation Logic")
 
@@ -1025,7 +1071,7 @@ with main_tabs[3]:
         )
         fig_quality.add_vline(x=5000, line_dash="dash", line_color=COLORS["danger"],
                                annotation_text="Reference: 5000", annotation_position="top")
-        st.plotly_chart(fig_quality, use_container_width=True)
+        st.plotly_chart(fig_quality, use_container_width=True, key="data-quality-category-breakdown")
 
         st.download_button(
             "Download quality breakdown (XLSX)",
@@ -1170,7 +1216,7 @@ if enable_insights:
                               color_discrete_map={"Male": "#1E3A5F", "Female": "#E91E63"})
             fig_gpie.update_traces(textposition="inside", textinfo="percent+label")
             fig_gpie.update_layout(font=dict(size=14), title_font_size=18)
-            st.plotly_chart(fig_gpie, use_container_width=True)
+            st.plotly_chart(fig_gpie, use_container_width=True, key="insights-gender-participation-pie")
 
             # Gender performance comparison – grouped bars per test
             st.markdown("### Performance Comparison by Gender")
@@ -1195,7 +1241,7 @@ if enable_insights:
                                     text="Average")
                 fig_gperf.update_layout(font=dict(size=12), title_font_size=18, xaxis_tickangle=-30,
                                          legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-                st.plotly_chart(fig_gperf, use_container_width=True)
+                st.plotly_chart(fig_gperf, use_container_width=True, key="insights-gender-performance-bars")
 
             # Top 5% gender split — per test breakdown
             st.markdown("### Top 5% Athletes — Gender Split (Per Test)")
@@ -1256,7 +1302,11 @@ if enable_insights:
                                             title=test_name, text="Label")
                             fig_t5.update_layout(font=dict(size=11), title_font_size=14, showlegend=False,
                                                   margin=dict(t=50, b=40))
-                            st.plotly_chart(fig_t5, use_container_width=True)
+                            st.plotly_chart(
+                                fig_t5,
+                                use_container_width=True,
+                                key=f"insights-gender-top5-{test_name}",
+                            )
 
         # ────────────────────────── AGE ─────────────────────────────
         with insight_tabs[1]:
@@ -1269,7 +1319,7 @@ if enable_insights:
             fig_age_bar = px.bar(age_counts, x="Age", y="Count", title="Participant Count by Age",
                                   color_discrete_sequence=[COLORS["primary"]], text="Label")
             fig_age_bar.update_layout(font=dict(size=14), title_font_size=18)
-            st.plotly_chart(fig_age_bar, use_container_width=True)
+            st.plotly_chart(fig_age_bar, use_container_width=True, key="insights-age-distribution")
 
             # Define age groups
             def age_group(a):
@@ -1316,7 +1366,11 @@ if enable_insights:
                                             text="Average")
                             fig_at.update_layout(font=dict(size=11), title_font_size=14, showlegend=False,
                                                   xaxis_tickangle=-20, margin=dict(t=50, b=40))
-                            st.plotly_chart(fig_at, use_container_width=True)
+                            st.plotly_chart(
+                                fig_at,
+                                use_container_width=True,
+                                key=f"insights-age-performance-{test_name}",
+                            )
 
         # ────────────────────────── DEMOGRAPHIC ─────────────────────
         with insight_tabs[2]:
@@ -1372,12 +1426,15 @@ if enable_insights:
                 # Map our district names to GADM names for choropleth matching
                 dist_gender["gadm_name"] = dist_gender["district"].map(DISTRICT_NAME_TO_GADM)
 
+                def _pct(part: float, total: float) -> float:
+                    return (part / total * 100.0) if total else 0.0
+
                 dist_gender["hover_text"] = dist_gender.apply(
                     lambda r: (
                         f"<b>{r['district']}</b><br>"
                         f"Total Athletes: {r['Total']}<br>"
-                        f"Male: {r['Male']} ({r['Male']/r['Total']*100:.1f}%)<br>"
-                        f"Female: {r['Female']} ({r['Female']/r['Total']*100:.1f}%)<br>"
+                        f"Male: {r['Male']} ({_pct(r['Male'], r['Total']):.1f}%)<br>"
+                        f"Female: {r['Female']} ({_pct(r['Female'], r['Total']):.1f}%)<br>"
                         f"Avg Overall Score: {r['Avg Score']:.4f}"
                     ), axis=1
                 )
@@ -1408,14 +1465,16 @@ if enable_insights:
                     geo=dict(bgcolor="#E8F4FD"),
                     coloraxis_colorbar=dict(title="Athletes"),
                 )
-                st.plotly_chart(fig_map, use_container_width=True)
+                st.plotly_chart(fig_map, use_container_width=True, key="insights-demo-district-map")
                 st.caption("Districts are colour-filled by athlete count (darker = more athletes). "
                            "Hover over a district for total participants, gender split, and performance indicator.")
 
                 # Horizontal bar for participation
                 _dist_sorted = dist_counts.sort_values("Count", ascending=True).copy()
                 _dist_total = _dist_sorted["Count"].sum()
-                _dist_sorted["Label"] = _dist_sorted["Count"].apply(lambda c: f"{c} ({c/_dist_total*100:.1f}%)")
+                _dist_sorted["Label"] = _dist_sorted["Count"].apply(
+                    lambda c: f"{c} ({_pct(c, _dist_total):.1f}%)"
+                )
                 fig_distbar = px.bar(_dist_sorted,
                                       x="Count", y="District", orientation="h",
                                       title="Athlete Participation by District",
@@ -1424,7 +1483,11 @@ if enable_insights:
                 fig_distbar.update_layout(font=dict(size=12), title_font_size=18,
                                            height=max(500, len(dist_counts) * 30 + 100),
                                            margin=dict(l=180))
-                st.plotly_chart(fig_distbar, use_container_width=True)
+                st.plotly_chart(
+                    fig_distbar,
+                    use_container_width=True,
+                    key="insights-demo-district-participation-bar",
+                )
 
                 # ── District Performance Ranking ──────────────────────
                 st.markdown("### District Performance Ranking (Overall Score)")
@@ -1536,7 +1599,11 @@ if enable_insights:
                             geo=dict(bgcolor="#F7F9FC"),
                             coloraxis_colorbar=dict(title="Avg Score"),
                         )
-                        st.plotly_chart(fig_dg, use_container_width=True)
+                        st.plotly_chart(
+                            fig_dg,
+                            use_container_width=True,
+                            key=f"insights-demo-dg-{gender.lower()}-map",
+                        )
 
                 st.caption("Side-by-side choropleth maps showing average overall score for Male (blue) and Female (pink) "
                            "athletes per district. Darker colour = higher average score.")
@@ -1576,8 +1643,11 @@ if enable_insights:
 
                     # Athletes per district for error rate calc
                     athletes_per_dist = working["district"].value_counts().to_dict()
-                    err_by_district["Athletes"] = err_by_district["District"].map(athletes_per_dist)
-                    err_by_district["Error Rate"] = (err_by_district["Total Errors"] / err_by_district["Athletes"]).round(2)
+                    err_by_district["Athletes"] = err_by_district["District"].map(athletes_per_dist).fillna(0)
+                    err_by_district["Error Rate"] = err_by_district.apply(
+                        lambda r: round(r["Total Errors"] / r["Athletes"], 2) if r["Athletes"] else 0.0,
+                        axis=1,
+                    )
 
                     # Map: choropleth colored by error rate
                     err_by_district["gadm_name"] = err_by_district["District"].map(DISTRICT_NAME_TO_GADM)
@@ -1608,7 +1678,11 @@ if enable_insights:
                         geo=dict(bgcolor="#FFF5F5"),
                         coloraxis_colorbar=dict(title="Errors/Athlete"),
                     )
-                    st.plotly_chart(fig_err_map, use_container_width=True)
+                    st.plotly_chart(
+                        fig_err_map,
+                        use_container_width=True,
+                        key="insights-demo-efficiency-error-map",
+                    )
                     st.caption("Districts are colour-filled by error rate (red = worst/most errors, green = best/fewest errors). "
                                "Hover for missing value vs data entry error breakdown.")
 
@@ -1636,7 +1710,11 @@ if enable_insights:
                         margin=dict(l=180),
                         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
                     )
-                    st.plotly_chart(fig_err_bar, use_container_width=True)
+                    st.plotly_chart(
+                        fig_err_bar,
+                        use_container_width=True,
+                        key="insights-demo-efficiency-error-bar",
+                    )
 
                     # Best data quality districts
                     best_quality = err_by_district.sort_values("Error Rate", ascending=True).head(5)
