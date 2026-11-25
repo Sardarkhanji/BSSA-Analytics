@@ -693,6 +693,7 @@ with title_col:
 # upload.  The file uploader is shown as a fallback for standalone use.
 _session_id: str = st.query_params.get("session", "")
 _session_bytes: Optional[bytes] = None
+_default_name: Optional[str] = None
 
 if _session_id:
     try:
@@ -713,22 +714,37 @@ if _session_id:
             "Please upload a file manually."
         )
 
+# Bundled dataset that is loaded by default when no session or upload is given.
+DEFAULT_DATA_PATH = Path(__file__).parent / "Athlete_10000_augmented.xlsx"
+
 if _session_bytes:
     # Running in integrated mode — no file upload needed
     st.info("📊 Live data loaded from the Data Collection app.")
     uploaded = None
 else:
-    uploaded = st.file_uploader("Select athlete file", type=["xlsx", "csv"])
+    uploaded = st.file_uploader(
+        "Select athlete file (optional — replaces the default dataset)",
+        type=["xlsx", "csv"],
+    )
+    if not uploaded and DEFAULT_DATA_PATH.exists():
+        _session_bytes = DEFAULT_DATA_PATH.read_bytes()
+        _default_name = DEFAULT_DATA_PATH.name
+        st.info(f"📁 Showing the default dataset: `{_default_name}`. Upload a file to use different data.")
 
 if not _session_bytes and not uploaded:
-    st.info("Please upload your `.xlsx` file to begin.")
+    st.info("Please upload an `.xlsx` or `.csv` file to begin.")
     st.stop()
 
 basic_cfg, time_cfg, dist_cfg, all_tests_cfg = build_configs_from_ui()
 
 with st.spinner("Processing data and preparing analytics..."):
     if _session_bytes:
-        processed = process_data(_session_bytes, "live_data.csv", basic_cfg, all_tests_cfg)
+        processed = process_data(
+            _session_bytes,
+            _default_name if _default_name else "live_data.csv",
+            basic_cfg,
+            all_tests_cfg,
+        )
     else:
         processed = process_data(uploaded.getvalue(), uploaded.name, basic_cfg, all_tests_cfg)
 

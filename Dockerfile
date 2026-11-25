@@ -18,6 +18,7 @@ COPY api_server.py ./
 COPY start.sh ./
 COPY bihar_districts.geojson ./
 COPY "BSSA_logo.png" ./
+COPY Athlete_10000_augmented.xlsx ./
 
 RUN chmod +x start.sh
 
